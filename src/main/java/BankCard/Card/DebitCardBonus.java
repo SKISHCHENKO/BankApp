@@ -2,55 +2,110 @@ package BankCard.Card;
 
 import java.util.concurrent.atomic.AtomicLong;
 
-// дебетовая карта с бонусами в виде кэшбека и бонусных баллов
-public class DebitCardPlus extends DebitCard {
-    private AtomicLong bonuses; //количество бонусов
-    private final int CASHBACK_INDEX = 5; //процент кэшбека
-    private final int CASHBACK_LIMIT = 5000; //лимит покупки для начисления кэшбека
-    private final int BONUS_LIMIT = 500; //лимит покупки для начисления бонусов
-    private final int BONUS_INDEX = 1; // процент для начисления бонусов
+// Дебетовая карта с бонусами (кэшбек и бонусные баллы)
+public class DebitCardBonus extends DebitCard {
+    private final AtomicLong bonuses; // Количество бонусов
+    private static final int CASHBACK_PERCENTAGE = 5;  // Процент кэшбека
+    private static final int CASHBACK_LIMIT = 5000;   // При условии трат свыше указанного лимита
+    private static final int BONUS_LIMIT = 1000;    // Начисление бонусов при покупке свыше указанного лимита
+    private static final int BONUS_PERCENTAGE = 1; // Процент для начисления бонусов
+    private static final double ACCUMULATION_PERCENTAGE = 0.005; // Процент накопления от суммы пополнения
 
-    public DebitCardPlus(String owner, long balance) {
+    public DebitCardBonus(String owner, long balance) {
         super(owner, balance);
-        bonuses = new AtomicLong(0);
+        this.bonuses = new AtomicLong(0);
     }
 
-    //новый метод для начисления кэшбека и бонусов, просто метод pay в этом случае используется для transfer
-    public boolean payWithBonuses(long amount) {
-        if (balance.get() > 0 && balance.get() >= amount && amount > 0) {
-            if (amount >= BONUS_LIMIT) {
-                bonuses.addAndGet(amount * BONUS_INDEX / 100);
-            }
-            if (amount >= CASHBACK_LIMIT) {
-                amount = amount * (100 - CASHBACK_INDEX) / 100;
-            }
-            balance.addAndGet(-amount);
-            return true;
-        } else return false;
-    }
+    // Основной метод для оплаты, с учетом бонусов и кэшбека
+    public boolean pay(long amount, boolean useBonuses) {
+        if (amount <= 0 || !hasSufficientFunds(amount)) {
+            System.out.println("Недостаточно средств или некорректная сумма.");
+            return false;
+        }
 
-    //permission - это разрешение от пользователя использовать бонусы для оплаты
-    public boolean pay(long amount, boolean permission) {
-        boolean b = false;
-        if (permission && bonuses.get() > 0 && amount > 0) {
+        if (useBonuses && bonuses.get() > 0) {
             if (bonuses.get() >= amount) {
-                bonuses.addAndGet(-amount);
-                b = true;
+                bonuses.addAndGet(-amount);  // Полная оплата бонусами
+                System.out.println("Оплата выполнена полностью бонусами.");
+                return true;
             } else {
-                long delta = amount - bonuses.get();
-                if (this.payWithBonuses(delta)) {
-                    bonuses.set(0);
-                    b = true;
-                }
+                // Частичное покрытие бонусами, остальное с баланса
+                long remainingAmount = amount - bonuses.get();
+                bonuses.set(0);  // Все бонусы израсходованы
+                return processPayment(remainingAmount);
             }
-        } else b = this.payWithBonuses(amount);
-        return b;
+        } else {
+            return processPayment(amount);
+        }
     }
 
+    // Метод пополнения баланса с начислением бонусов
     @Override
-    public String getInfo() {
-        return super.getInfo() + ",\n"
-                + "количество бонусов на карте: " + bonuses.get() + ",\n"
-                + "процент кэшбека составляет: " + CASHBACK_INDEX + "% при покупках от " + CASHBACK_LIMIT + "\n";
+    public boolean topUp(long amount) {
+        if (amount <= 0) {
+            System.out.println("Сумма пополнения должна быть положительной.");
+            return false;
+        }
+        super.topUp(amount);
+        // long accumulatedBonus = Math.round(amount * ACCUMULATION_PERCENTAGE); точное округление
+        long accumulatedBonus = (long) (amount * ACCUMULATION_PERCENTAGE); // отбрасываем дробную часть
+        bonuses.addAndGet(accumulatedBonus);
+        System.out.println("Баланс пополнен на " + amount + ". Начислено бонусов: " + accumulatedBonus);
+        return true;
+    }
+
+    // Метод для выполнения оплаты с учетом кэшбека и начисления бонусов
+    private boolean processPayment(long amount) {
+        if (amount <= 0 || !hasSufficientFunds(amount)) {
+            return false;  // Недостаточно средств или некорректная сумма
+        }
+
+        // Расчет и добавление бонусов
+        addBonuses(amount);
+
+        // Применение кэшбека
+        long amountAfterCashback = applyCashback(amount);
+
+        // Выполняем оплату
+        balance.addAndGet(-amountAfterCashback);
+        System.out.println("Сумма после кэшбека: " + amountAfterCashback);
+        return true;
+    }
+
+    // Начисление бонусов
+    private void addBonuses(long amount) {
+        if (amount >= BONUS_LIMIT) {
+            long bonusAmount = amount * BONUS_PERCENTAGE / 100;
+            bonuses.addAndGet(bonusAmount);
+            System.out.println("Начислено бонусов: " + bonusAmount);
+        }
+    }
+
+    // Применение кэшбека
+    private long applyCashback(long amount) {
+        if (amount >= CASHBACK_LIMIT) {
+            long cashbackAmount = amount * CASHBACK_PERCENTAGE / 100;
+            System.out.println("Кэшбек: " + cashbackAmount);
+            return amount - cashbackAmount;
+        }
+        return amount;
+    }
+
+    // Проверка наличия достаточных средств. Если true - достаточно средств
+    private boolean hasSufficientFunds(long amount) {
+        return balance.get() >= amount;
+    }
+
+    // Получение информации о доступных средствах и бонусах
+    @Override
+    public String getAvailableFunds() {
+        return String.format(
+                "%s,\nКоличество бонусов: %d,\nКэшбек: %d%% при покупках от %d,\nБонусы начисляются при покупках от %d",
+                super.getAvailableFunds(),
+                bonuses.get(),
+                CASHBACK_PERCENTAGE,
+                CASHBACK_LIMIT,
+                BONUS_LIMIT
+        );
     }
 }
